@@ -6,21 +6,21 @@ server:
 
 spring:
   jta:
-    # ÊÂÎñ¹ÜÀíÆ÷Î¨Ò»±êÊ¶·û
+    # äº‹åŠ¡ç®¡ç†å™¨å”¯ä¸€æ ‡è¯†ç¬¦
     transaction-manager-id: txManager
   datasource:
-    # DruidÁ¬½Ó³ØÅäÖÃ¡£spring-boot-2Ä¬ÈÏÁ¬½Ó³Øhikari²»Ö§³ÖMysqlXADataSource
+    # Druidè¿æ¥æ± é…ç½®ã€‚spring-boot-2é»˜è®¤è¿æ¥æ± hikariä¸æ”¯æŒMysqlXADataSource
     type: com.alibaba.druid.pool.xa.DruidXADataSource
-    # ×îĞ¡¿ÕÏĞÁ¬½Ó
+    # æœ€å°ç©ºé—²è¿æ¥
     min-pool-size: 5
-    # ³ØÖĞ×î´óÁ¬½ÓÊı
+    # æ± ä¸­æœ€å¤§è¿æ¥æ•°
     max-pool-size: 20
-    # ÉèÖÃÁ¬½ÓÔÚ³ØÖĞ±»×Ô¶¯Ïú»ÙÖ®Ç°±£ÁôµÄ×î´óÃëÊı¡£ ¿ÉÑ¡£¬Ä¬ÈÏÎª0£¨ÎŞÏŞÖÆ£©¡£
+    # è®¾ç½®è¿æ¥åœ¨æ± ä¸­è¢«è‡ªåŠ¨é”€æ¯ä¹‹å‰ä¿ç•™çš„æœ€å¤§ç§’æ•°ã€‚ å¯é€‰ï¼Œé»˜è®¤ä¸º0ï¼ˆæ— é™åˆ¶ï¼‰ã€‚
     max-life-time: 0
-    # ·µ»ØÁ¬½ÓÇ°ÓÃÓÚ²âÊÔÁ¬½ÓµÄSQL²éÑ¯
+    # è¿”å›è¿æ¥å‰ç”¨äºæµ‹è¯•è¿æ¥çš„SQLæŸ¥è¯¢
     test-query: SELECT 1
 
-    # ¶àÊı¾İÔ´ÅäÖÃ
+    # å¤šæ•°æ®æºé…ç½®
     cpq-db:
       name: cpq
       url: jdbc:mysql://localhost:3306/mydb1?useUnicode=true&characterEncoding=utf8&useJDBCCompliantTimezoneShift=true&useLegacyDatetimeCode=false&serverTimezone=Asia/Shanghai&useSSL=false
