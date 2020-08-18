@@ -1,0 +1,2 @@
+{"id":"txManager159773552566500001","wasCommitted":true,"participants":[{"uri":"txManager1","state":"COMMITTING","expires":1597735537321,"resourceName":"cpqDataSource"},{"uri":"txManager2","state":"COMMITTING","expires":1597735537321,"resourceName":"shiroDataSource"}]}
+{"id":"txManager159773552566500001","wasCommitted":true,"participants":[{"uri":"txManager1","state":"TERMINATED","expires":1597735537331,"resourceName":"cpqDataSource"},{"uri":"txManager2","state":"TERMINATED","expires":1597735537331,"resourceName":"shiroDataSource"}]}

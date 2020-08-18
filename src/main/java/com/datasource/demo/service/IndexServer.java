@@ -4,10 +4,7 @@ import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.datasource.demo.entity.gas.*;
-import com.datasource.demo.entity.mydb.CardoprecordEntity;
-import com.datasource.demo.entity.mydb.ConsumerEntity;
-import com.datasource.demo.entity.mydb.MakeupcardEntity;
-import com.datasource.demo.entity.mydb.UsercardinfoEntity;
+import com.datasource.demo.entity.mydb.*;
 import com.datasource.demo.service.gas.*;
 import com.datasource.demo.service.mydb.*;
 import com.datasource.demo.utils.MoneyUtil;
@@ -74,20 +71,79 @@ public class IndexServer {
     @Autowired
     GasUserChargeRecord2020Service userChargeRecord2020Service;
 
-    @Transactional
     public String index() {
-        return "";
+        GasUserEntity gasUserEntity=gasUserService.getById("JF" + addZeroForNum(String.valueOf(1), 8));
+        return JSONObject.toJSONString(gasUserEntity);
     }
+
     /**
-     * @description: 同步方法
+     * @description: 同步小区
+     * @date: 2020/8/18
+     * @author: zwh
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public String syncComm() {
+        AtomicInteger areaCount= new AtomicInteger();
+        AtomicInteger bookCount= new AtomicInteger();
+        List<CommunityEntity> list = communityService.list();
+        // 获取本号最大值
+        list.forEach(item->{
+            GasBookNoEntity books = gasBookNoService.getOne(new QueryWrapper<GasBookNoEntity>().lt("id", 7000).orderByDesc("id").last("limit 1"));
+            GasAreaCommunityEntity areaCommunity=new GasAreaCommunityEntity();
+            areaCommunity.setId(getUUID());
+            areaCommunity.setName(item.getCommName()+"(金凤系统小区)");
+            areaCommunity.setAddress(areaCommunity.getName());
+            areaCommunity.setOldKeywords(areaCommunity.getName());
+            areaCommunity.setOpBy("system import");
+            areaCommunity.setOpAt(Times.getTS());
+            areaCommunity.setDelFlag(false);
+            areaCommunity.setAreaCode("150203");
+            GasBookNoEntity bookNoEntity=new GasBookNoEntity();
+            bookNoEntity.setId(books.getId()+1);
+            bookNoEntity.setAddress(areaCommunity.getName());
+            bookNoEntity.setCommunityId(areaCommunity.getId());
+            bookNoEntity.setDistributed(true);
+            bookNoEntity.setOpBy("system import");
+            bookNoEntity.setOpAt(Times.getTS());
+            bookNoEntity.setDelFlag(false);
+            // 查询小区下面的人数
+            List<ConsumerEntity> consumer = consumerService.list(new QueryWrapper<ConsumerEntity>().eq("Community_Comm_id", areaCommunity.getId()));
+            bookNoEntity.setUserCount(consumer.size());
+            boolean area=gasAreaCommunityService.saveOrUpdate(areaCommunity);
+            if(!area){
+                log.error("失败:{}", areaCommunity.getId());
+            }else {
+                areaCount.getAndIncrement();
+            }
+            boolean book=gasBookNoService.saveOrUpdate(bookNoEntity);
+            if(!book){
+                log.error("失败:{}", bookNoEntity.getId());
+            }else {
+                bookCount.getAndIncrement();
+            }
+        });
+        String res="小区成功:"+areaCount+"本号成功:"+bookCount;
+        String count="小区总数:"+list.size()+"本号总数:"+list.size();
+        return res+"====="+count;
+    }
+
+
+    /**
+     * @description: 同步方法信息不包含小区
      * @date: 2020/8/16
      * @author: zwh
      */
     @Transactional(rollbackFor = Exception.class)
-    //  @Aop(TransAop.READ_COMMITTED)
     public void syncInfo(Integer id) {
         try {
-            AtomicInteger count= new AtomicInteger();
+            AtomicInteger count = new AtomicInteger();
+            AtomicInteger meterCount = new AtomicInteger();
+            AtomicInteger buyGasCount = new AtomicInteger();
+            AtomicInteger mendGasCount = new AtomicInteger();
+            AtomicInteger refundGasCount = new AtomicInteger();
+            List<GasUserChargeRecordEntity> chargeRecordList = new ArrayList<>();
+            List<GasMendGasEntity> mendGasList = new ArrayList<>();
+            List<GasRefundGasEntity> refundGasList = new ArrayList<>();
             // 系统内部小区
             Map<String, Object> gasComm = gasAreaCommunityService.getListAreaToMap();
             // 金凤小区
@@ -100,10 +156,16 @@ public class IndexServer {
                 consumerEntities = consumerService.list(new QueryWrapper<ConsumerEntity>().orderByAsc("CSM_id"));
             }
 
-            if(Lang.isEmpty(consumerEntities)){
+            if (Lang.isEmpty(consumerEntities)) {
                 return;
             }
-            consumerEntities.forEach(item -> {
+            List<ConsumerEntity> consumerEntities1 =new ArrayList<>();
+            if(consumerEntities.size()>5){
+                consumerEntities1=consumerEntities.subList(0,5);
+            }else {
+               consumerEntities1=consumerEntities.subList(0,consumerEntities.size());
+            }
+            consumerEntities1.forEach(item -> {
                 UsercardinfoEntity cardInfo = usercardinfoService.getById(item.getCsmId());
                 // 金凤库购气+补气次数
                 /*List<CardoprecordEntity> buyJf = cardoprecordService.list(new QueryWrapper<CardoprecordEntity>()
@@ -141,40 +203,51 @@ public class IndexServer {
                     int refund=reFundCord==null?0:reFundCord.size();
                     jfCount=buyJf.size()-refund;
                 }*/
-                GasUserEntity gasUser = new GasUserEntity();
-                gasUser.setAccountNumber("JF" + addZeroForNum(String.valueOf(item.getCsmId()), 8));
-                gasUser.setSysNumber("03");
-                gasUser.setOldAccountNumber("");
-                // 小区名称
-                if (keyAndValue(jfComm.get(item.getCommunityCommId()), gasComm)) {
-                    gasUser.setCommunity(getKey(gasComm, jfComm.get(item.getCommunityCommId())).get(0));
-                    Integer bookNo = Lang.isEmpty(gasBookNoService.getBooks(gasUser.getCommunity())) ? 1 : gasBookNoService.getBooks(gasUser.getCommunity()).getId();
-                    gasUser.setBookNo(String.valueOf(bookNo));
+                // 用户是否存在
+                GasUserEntity gasUser=gasUserService.getById("JF" + addZeroForNum(String.valueOf(item.getCsmId()), 8));
+                if(Lang.isEmpty(gasUser)){
+                    gasUser.setAccountNumber("JF" + addZeroForNum(String.valueOf(item.getCsmId()), 8));
+                    gasUser.setSysNumber("03");
+                    gasUser.setOldAccountNumber("");
+                    // 小区名称
+                    if (keyAndValue(jfComm.get(item.getCommunityCommId())+"(金凤系统小区)", gasComm)) {
+                        gasUser.setCommunity(getKey(gasComm, jfComm.get(item.getCommunityCommId())).get(0));
+                        GasBookNoEntity bookNoEntity=gasBookNoService.getBooks(gasUser.getCommunity());
+                        Integer bookNo = Lang.isEmpty(bookNoEntity) ? 1 : bookNoEntity.getId()+1;
+                        gasUser.setBookNo(String.valueOf(bookNo));
+                    }
+                    gasUser.setAccountNo(0);//补户号
+                    gasUser.setAccountName(item.getCsmName());
+                    gasUser.setBalance(MoneyUtil.yuanToLi(String.valueOf(cardInfo.getCardTodayRemainMoney())));
+                    gasUser.setArrears(0L);
+                    gasUser.setLateFee(0L);
+                    gasUser.setUseType(cnbt_price_map.get(cardInfo.getWaterpriceWpId()));//用气类型
+                    gasUser.setMobile(item.getCsmTel1());
+                    gasUser.setAddress(item.getCsmAddr());
+                    gasUser.setUserType(1);
+                    gasUser.setMeterId(getUUID());
+                    gasUser.setOpenTime(item.getCsmOpentime().toEpochSecond(ZoneOffset.of("+8")));
+                    gasUser.setAddGas(BigDecimal.valueOf(0));
+                    gasUser.setStatus(1);
+                    gasUser.setDelFlag(item.getCsmIsdeleted() == 0 ? false : true);
+                    gasUser.setCanDelete(false);
+                    gasUser.setHeatingBand(0);
+                    gasUser.setBatchOpen(0);
+                    gasUser.setLastRechargeTime(lastRecTime);//上次充值时间
+                    gasUser.setLastRechargeMoney(lastRecMoney);//上次充值金额
+                    gasUser.setOpenCard(item.getCsmIsopened());
+                    gasUser.setTotalDosage(BigDecimal.valueOf(jfSumCount));
+                    gasUser.setTotalBuyGasMoney(jfSumMoney);
+                    //  用户入库
+                    boolean user = gasUserService.insetUser(gasUser);
+                    if (!user) {
+                        log.error("失败:{}", gasUser.getAccountNumber());
+                    } else {
+                        count.getAndIncrement();
+                    }
                 }
-                gasUser.setAccountNo(0);//补户号
-                gasUser.setAccountName(item.getCsmName());
-                gasUser.setBalance(MoneyUtil.yuanToLi(String.valueOf(cardInfo.getCardTodayRemainMoney())));
-                gasUser.setArrears(0L);
-                gasUser.setLateFee(0L);
-                gasUser.setUseType(cnbt_price_map.get(cardInfo.getWaterpriceWpId()));//用气类型
-                gasUser.setMobile(item.getCsmTel1());
-                gasUser.setAddress(item.getCsmAddr());
-                gasUser.setUserType(1);
-                gasUser.setMeterId(UUID.randomUUID().toString().replaceAll("-", ""));
-                gasUser.setOpenTime(item.getCsmOpentime().toEpochSecond(ZoneOffset.of("+8")));
-                gasUser.setAddGas(BigDecimal.valueOf(0));
-                gasUser.setStatus(1);
-                gasUser.setDelFlag(item.getCsmIsdeleted()==0?false:true);
-                gasUser.setCanDelete(false);
-                gasUser.setHeatingBand(0);
-                gasUser.setBatchOpen(0);
-                gasUser.setLastRechargeTime(lastRecTime);//上次充值时间
-                gasUser.setLastRechargeMoney(lastRecMoney);//上次充值金额
-                gasUser.setOpenCard(item.getCsmIsopened());
-                gasUser.setTotalDosage(BigDecimal.valueOf(jfSumCount));
-                gasUser.setTotalBuyGasMoney(jfSumMoney);
-                //    meter
                 GasMeterEntity gasMeter = new GasMeterEntity();
+                //  fixme   meter 重复执行   
                 gasMeter.setId((gasUser.getMeterId()));
                 gasMeter.setMeterNo("");
                 gasMeter.setSupplier("JF");
@@ -188,11 +261,15 @@ public class IndexServer {
                 gasMeter.setOpenCardTime(item.getCsmOpentime().toEpochSecond(ZoneOffset.of("+8")));
                 gasMeter.setBuyGasCount(cardInfo.getCardBuycount());
                 gasMeter.setMendCardCount(mendCount);
+                // 表具入库
+                boolean meter = gasMeterService.insertMeter(gasMeter);
+                if (!meter) {
+                    log.error("表具：{}", gasMeter.getId());
+                } else {
+                    meterCount.getAndIncrement();
+                }
                 // 购气记录
-                List<GasUserChargeRecord2019Entity> chargeRecordList_2019 = new ArrayList<>();
-                List<GasUserChargeRecord2020Entity> chargeRecordList_2020 = new ArrayList<>();
-                List<GasMendGasEntity> mendGasList = new ArrayList<>();
-                List<GasRefundGasEntity> refundGasList = new ArrayList<>();
+
                /* cardCord.forEach(buyGas->{
                     GasUserChargeRecordEntity gasUserCharge=new GasUserChargeRecordEntity();
                     gasUserCharge.setId("JF"+buyGas.getCoId());
@@ -290,18 +367,30 @@ public class IndexServer {
                         gasUserCharge.setSettleByName("系统");
                         gasUserCharge.setOpByName("系统");
                         gasUserCharge.setNote(accGas.getCoRemark());
+                        //购气入库
                         if (("2019").equals(accGas.getCoCreatetime().toString().substring(0, 4))) {
                             GasUserChargeRecord2019Entity uc2019 = new GasUserChargeRecord2019Entity();
                             copyProperties(gasUserCharge, uc2019);
-                            chargeRecordList_2019.add(uc2019);
+                            boolean uc1 = userChargeRecord2019Service.saveOrUpdate(uc2019);
+                            if (!uc1) {
+                                log.error("表具：{}", JSONObject.toJSONString(uc2019));
+                            } else {
+                                buyGasCount.getAndIncrement();
+                            }
                         } else if (("2020").equals(accGas.getCoCreatetime().toString().substring(0, 4))) {
                             GasUserChargeRecord2020Entity uc2020 = new GasUserChargeRecord2020Entity();
                             copyProperties(gasUserCharge, uc2020);
-                            chargeRecordList_2020.add(uc2020);
+                            boolean uc2 = userChargeRecord2020Service.saveOrUpdate(uc2020);
+                            if (!uc2) {
+                                log.error("表具：{}", JSONObject.toJSONString(uc2020));
+                            } else {
+                                buyGasCount.getAndIncrement();
+                            }
                         }
+                        chargeRecordList.add(gasUserCharge);
                     }
                     //补气
-                    if (accGas.getCoWatercount() >= 0&& accGas.getCoFreewater() > 0) {
+                    if (accGas.getCoWatercount() >= 0 && accGas.getCoFreewater() > 0) {
                         GasMendGasEntity gasMendGasEntity = new GasMendGasEntity();
                         gasMendGasEntity.setId(accNo(accGas.getCoCreatetime(), accGas.getCoId()));
                         gasMendGasEntity.setAccountNumber(gasUser.getAccountNumber());
@@ -317,10 +406,16 @@ public class IndexServer {
                         gasMendGasEntity.setFeeDetail("");
                         gasMendGasEntity.setDelFlag(false);
                         gasMendGasEntity.setCreatAt(accGas.getCoCreatetime().toEpochSecond(ZoneOffset.of("+8")));
-                        // fixme 状态
                         gasMendGasEntity.setStatus(2);
                         gasMendGasEntity.setReason(accGas.getCoRemark());
                         gasMendGasEntity.setOpByName("系统");
+                        // 补气入库
+                        boolean insertMendGas = gasMendGasService.saveOrUpdate(gasMendGasEntity);
+                        if (!insertMendGas) {
+                            log.error("表具：{}", JSONObject.toJSONString(gasMendGasEntity));
+                        }else {
+                            mendGasCount.getAndIncrement();
+                        }
                         mendGasList.add(gasMendGasEntity);
                     }
                     // 退气
@@ -331,7 +426,7 @@ public class IndexServer {
                         gasRefundGasEntity.setMeterId(gasUser.getMeterId());
                         gasRefundGasEntity.setUseType(gasUser.getUseType());
                         gasRefundGasEntity.setUserType(gasUser.getUserType());
-                        gasRefundGasEntity.setRefundGas(BigDecimal.valueOf(Math.abs(accGas.getCoWatercount())+accGas.getCoFreewater()));
+                        gasRefundGasEntity.setRefundGas(BigDecimal.valueOf(Math.abs(accGas.getCoWatercount()) + accGas.getCoFreewater()));
                         gasRefundGasEntity.setRefundGasMoney(0L);
                         gasRefundGasEntity.setRefundMoney(Math.abs(MoneyUtil.yuanToLi(String.valueOf(accGas.getCoTotalnormalfee()))));//气费金额
                         gasRefundGasEntity.setChargeType(0);
@@ -341,55 +436,26 @@ public class IndexServer {
                         gasRefundGasEntity.setCreatAt(accGas.getCoCreatetime().toEpochSecond(ZoneOffset.of("+8")));
                         gasRefundGasEntity.setReason(accGas.getCoRemark());
                         gasRefundGasEntity.setOpByName("系统");
+                        // 退气入库
+                        boolean refund1 = gasRefundGasService.saveOrUpdate(gasRefundGasEntity);
+                        if (!refund1) {
+                            log.error("表具：{}", JSONObject.toJSONString(gasRefundGasEntity));
+                        }else {
+                            refundGasCount.getAndIncrement();
+                        }
                         refundGasList.add(gasRefundGasEntity);
                     }
                 });
-                //  用户入库
-                boolean user = gasUserService.insetUser(gasUser);
-                if (!user) {
-                    log.error("失败:{}", gasUser.getAccountNumber());
-                }else {
-                    count.getAndIncrement();
-                }
-                int c=1/0;
-                // 表具入库
-                boolean meter = gasMeterService.insertMeter(gasMeter);
-                if (!meter) {
-                    log.error("表具：{}", gasMeter.getId());
-                }
-                // fixme 购气入库
-                if (!Lang.isEmpty(chargeRecordList_2019)) {
-                    boolean uc1 = userChargeRecord2019Service.insert2019(chargeRecordList_2019);
-                    if (!uc1) {
-                        log.error("表具：{}", JSONObject.toJSONString(chargeRecordList_2019));
-                    }
-                }
-                if (!Lang.isEmpty(chargeRecordList_2020)) {
-                    boolean uc2 = userChargeRecord2020Service.insert2020(chargeRecordList_2020);
-                    if (!uc2) {
-                        log.error("表具：{}", JSONObject.toJSONString(chargeRecordList_2019));
-                    }
-                }
-                // 补气
-                if (!Lang.isEmpty(mendGasList)) {
-                    boolean mend = gasMendGasService.insertMendGas(mendGasList);
-                    if (!mend) {
-                        log.error("表具：{}", JSONObject.toJSONString(chargeRecordList_2019));
-                    }
-                }
-                // 退气
-                if (!Lang.isEmpty(refundGasList)) {
-                    boolean refund = gasRefundGasService.insetRefund(refundGasList);
-                    if (!refund) {
-                        log.error("表具：{}", JSONObject.toJSONString(chargeRecordList_2019));
-                    }
-                }
             });
-            log.info("用户成功{}条",count);
+            log.info("用户成功{}条,水表成功{}条,购气成功{}条,补气成功{}条，退气成功{}条",
+                    count,meterCount,buyGasCount,mendGasCount,refundGasCount);
+            log.info("用户总{}条,水表总{}条,购气总{}条,补气总{}条，退气总{}条",
+                    consumerEntities.size(),consumerEntities.size(),chargeRecordList.size(),
+                    mendGasList.size(),refundGasList.size());
         } catch (Exception e) {
             e.printStackTrace();
             TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
-            log.error("异常：{}",e.getMessage());
+            log.error("异常：{}", e.getMessage());
         }
     }
 
@@ -484,5 +550,9 @@ public class IndexServer {
         } catch (Exception e) {
             log.error("BeanUtil property copy failed:Exception", e);
         }
+    }
+    // uuid
+    public String getUUID(){
+        return UUID.randomUUID().toString().replaceAll("-", "");
     }
 }
